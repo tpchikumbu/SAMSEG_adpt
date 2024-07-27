@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import PIL
+import csv
 from PIL import Image
 from torchvision import datasets, transforms
 import torchvision.transforms.functional as F
@@ -138,3 +139,10 @@ def compute_loss(output, seg, loss_functs, loss_weights, device):
 
         loss += temp * loss_weights[n]
     return loss
+
+def save_tloss_csv(pathname, epoch, tloss):
+    with open(pathname, mode='a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        if epoch == 1:
+            writer.writerow(['Epoch', 'Training Loss'])
+        writer.writerow([epoch, tloss])

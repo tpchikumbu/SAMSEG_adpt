@@ -1,3 +1,4 @@
+import os
 import torch
 import monai
 from tqdm import tqdm
@@ -54,6 +55,18 @@ num_epochs = config_file["TRAIN"]["NUM_EPOCHS"]
 loss_functions = [nn.MSELoss(), nn.CrossEntropyLoss()]
 loss_weights = [0.4, 0.7]
 
+# Setup output directories
+out_dir = "./train-out"
+backup_interval = 5
+
+latest_ckpt_path = os.path.join(out_dir, 'latest_ckpt.pth.tar')
+training_loss_path = os.path.join(out_dir, 'training_loss.csv')
+backup_ckpts_dir = os.path.join(out_dir, 'backup_ckpts')
+if not os.path.exists(backup_ckpts_dir):
+    os.makedirs(backup_ckpts_dir)
+    os.system(f'chmod a+rwx {backup_ckpts_dir}')
+
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # Set model to train and into the device
 model.train()
@@ -70,15 +83,15 @@ for epoch in range(num_epochs):
       batch_loss = []
       input = []
       for image in batch[0][1]:
-        input.append(processor(image, batch[0][2]))
+        input += (processor(image, batch[0][2]))
       outputs = model(batched_input=input,
                       multimask_output=False)
 
       stk_gt, stk_out = utils.stacking_batch(input, outputs)
       stk_out = stk_out.squeeze(1)
       stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
-      #loss = seg_loss(stk_out, stk_gt.float().to(device))
-      loss = utils.compute_loss(stk_out, stk_gt, loss_functions, loss_weights, device)
+      loss = seg_loss(stk_out, stk_gt.float().to(device))
+      #loss = utils.compute_loss(stk_out, stk_gt, loss_functions, loss_weights, device)
       print(f"Loss: {loss}")        
       
       optimizer.zero_grad()
@@ -87,8 +100,21 @@ for epoch in range(num_epochs):
       optimizer.step()
       epoch_losses.append(loss.item())
 
-    print(f'EPOCH: {epoch}')
-    print(f'Mean loss training: {mean(epoch_losses)}')
+    print(f'EPOCH: {epoch}; Mean training loss: {mean(epoch_losses)}')
+    utils.save_tloss_csv(training_loss_path, epoch, mean(epoch_losses))
+    print("Saving checkpoint...")
+    checkpoint = {
+      'epoch': epoch,
+      'model_sd': model.state_dict(),
+      'optim_sd': optimizer.state_dict(),
+      'model': model,
+      'loss_functions': loss_functions,
+      'loss_weights': loss_weights,
+    }
+    torch.save(checkpoint, latest_ckpt_path)
+    if epoch % backup_interval == 0:
+        torch.save(checkpoint, os.path.join(backup_ckpts_dir, f'epoch{epoch}.pth.tar'))
+    print('Checkpoint saved successfully.')
 
 # Save the parameters of the model in safetensors format
 rank = config_file["SAM"]["RANK"]
