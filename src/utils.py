@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import cv2
 import PIL
 from PIL import Image
 from torchvision import datasets, transforms
@@ -85,6 +86,32 @@ def get_bounding_box(ground_truth_map: np.array) -> list:
 
   return bbox
 
+def generate_bbox(seg_mask, margin=0):
+    
+    # Find contours.
+    contours, _ = cv2.findContours(seg_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    # Initialise the bounding box with the first contour.
+    x, y, w, h = cv2.boundingRect(contours[0])
+    x_min, y_min, x_max, y_max = x, y, x + w, y + h
+
+    # Iterate over all contours to find the union of bounding boxes.
+    for contour in contours[1:]:
+        x, y, w, h = cv2.boundingRect(contour)
+        x_min = min(x_min, x)
+        y_min = min(y_min, y)
+        x_max = max(x_max, x + w)
+        y_max = max(y_max, y + h)
+
+    # Adding margin.
+    x_min = max(0, x_min - margin)
+    y_min = max(0, y_min - margin)
+    x_max = min(seg_mask.shape[1], x_max + margin)
+    y_max = min(seg_mask.shape[0], y_max + margin)
+
+    return [x_min, y_min, x_max, y_max]
 
 def stacking_batch(batch, outputs):
     """
@@ -102,3 +129,12 @@ def stacking_batch(batch, outputs):
     stk_out = torch.stack([out["low_res_logits"] for out in outputs], dim=0)
         
     return stk_gt, stk_out
+
+def compute_loss(output, seg, loss_functs, loss_weights, device):
+    """Computes weighted loss between model output and ground truth #, summed across each region."""
+    loss = 0
+    for n, loss_function in enumerate(loss_functs):      
+        temp = loss_function(output.to(device), seg.to(device))
+
+        loss += temp * loss_weights[n]
+    return loss
