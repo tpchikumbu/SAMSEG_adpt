@@ -26,36 +26,38 @@ class Samprocessor:
         self.transform = ResizeLongestSide(sam_model.image_encoder.img_size)
         self.reset_image()
 
-    def __call__(self, image, mask) -> dict:
+    def __call__(self, image, mask) -> list:
         #imgs = [img for img in image]
         seg = (mask > 0).float() # Convert to binary
-        slice_idx = max_slice(seg)
+        slice_idx = find_slices(seg)
         
-        seg_slice = seg[ :, :, :, slice_idx]
-        prompt = utils.generate_bbox(seg_slice[0, :, :].cpu().numpy(), margin=0)
+        seg_slice = [seg[ :, :, :, i] for i in slice_idx]
+        prompt = [utils.generate_bbox(tum[0, :, :].cpu().numpy(), margin=0) for tum in seg_slice]
         
-        img_slice = image[ :, :, :, slice_idx]
+        img_slice = [image[ :, :, :, i] for i in slice_idx] #image[ :, :, :, slice_idx]
         # = torch.Size([ 1, 138, 202])
         
-        original_size = tuple(seg_slice.shape[-2:])
+        original_size = tuple(seg_slice[0].shape[-2:])
         
         # Processing of the image
         # seg_mask = np.array(seg_slice)#self.process_image(seg_slice, original_size, slice_idx)
-        image_torch = self.process_image(img_slice, original_size, slice_idx)
+        image_torch = [self.process_image(img) for img in img_slice]
 
         # Transform input prompts
-        box_torch = self.process_prompt(prompt, original_size)
+        box_torch = [self.process_prompt(pmt, original_size) for pmt in prompt]
 
-        inputs = {"image": image_torch, # tensor
-                  "original_size": original_size, # tuple
-                 "boxes": box_torch, # tensor
-                 "prompt" : prompt, #list
-                 "ground_truth_mask" : seg_slice[0, :, :]} #tensor
-        
-        return inputs
+        volume = []
+        for j in range(len(slice_idx)):
+            inputs = {"image": image_torch[j], # tensor
+                    "original_size": original_size, # tuple
+                    "boxes": box_torch[j], # tensor
+                    "prompt" : prompt[j], #list
+                    "ground_truth_mask" : seg_slice[j][0, :, :]} #tensor
+            volume.append(inputs)
+        return volume
 
 
-    def process_image(self, image: torch.tensor, original_size: tuple, slice_idx: int) -> torch.tensor:
+    def process_image(self, image: torch.tensor) -> torch.tensor:
         """
         Preprocess the image to make it to the input format of SAM
 
@@ -149,4 +151,37 @@ def max_slice(seg):
     # Find the slice with the largest area.
     largest_slice_idx = np.argmax(areas)
 
-    return largest_slice_idx
+    return [largest_slice_idx]
+
+def find_slices(seg, skip = 0):
+# """Finds the slice (in the z-direction) of a segmentation with the most tumour voxels."""
+# one_hot_encoded = np.where(seg != 0, 1, 0)
+# slice_sums = np.sum(one_hot_encoded, axis=(0,1))
+# max_index = np.argmax(slice_sums)
+
+    """Finds the slice with the largest cross-sectional area of the tumor.
+
+    Args:
+        seg: The 3D segmentation tensor with shape [B, 1, H, W, D].
+
+    Returns:
+        The index of the slice with the largest cross-sectional area of the tumor.
+    """
+    
+    # Ensure seg is a numpy array.
+    if not isinstance(seg, np.ndarray):
+        seg_np = seg.cpu().numpy()
+        seg_np = seg_np.squeeze(0)  # Remove batch and channel dimensions if present.
+    else:
+        seg_np = seg
+
+    # Ensure seg_np has shape (H, W, D).
+    assert len(seg_np.shape) == 3, f"Expected shape (H, W, D), but got {seg_np.shape}"
+
+    # Compute the area of the tumor in each slice along the depth dimension.
+    areas = [np.sum(seg_np[:, :, i]) for i in range(0, seg_np.shape[2], 1 + skip)]
+
+    # Find the slice with the largest area.
+    slice_idx = np.nonzero(areas)
+
+    return slice_idx[0]

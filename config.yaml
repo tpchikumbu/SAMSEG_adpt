@@ -3,8 +3,8 @@ DATASET:
   TEST_PATH: "./dataset/test"
 
 SAM:
-  CHECKPOINT: "./sam_vit_b_01ec64.pth"
+  CHECKPOINT: "/home/peter/Documents/Code/samseg/src/sam_vit_b_01ec64.pth"
   RANK: 512
 TRAIN:
   BATCH_SIZE: 1
-  NUM_EPOCHS: 50
+  NUM_EPOCHS: 5
