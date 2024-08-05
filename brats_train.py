@@ -14,7 +14,7 @@ import src.utils as utils
 #from src.brats_dataloader import DatasetSegmentation, collate_fn
 from src.brats_dataset import BratsDataset, collate_fn
 # from src.processor import Samprocessor
-from src.brats_processor import Samprocessor, max_slice
+from src.brats_processor import Samprocessor, find_slices
 
 
 from src.segment_anything import build_sam_vit_b, SamPredictor
@@ -80,25 +80,30 @@ for epoch in range(num_epochs):
     for i, batch in enumerate(tqdm(train_dataloader)):
       torch.cuda.empty_cache()
       print(f"{batch[0][0]}:")
+      # batch[0][2] = (batch[0][2] > 0).float() # Convert to binary
+      slice_idx = find_slices((batch[0][2] > 0).float())
       batch_loss = []
       input = []
-      for image in batch[0][1]:
-        input += (processor(image, batch[0][2]))
-      outputs = model(batched_input=input,
-                      multimask_output=False)
+      for idx in slice_idx:
+        for image in batch[0][1]:
+          input.append(processor(image, batch[0][2], idx))
+        outputs = model(batched_input=input,
+                        multimask_output=False)
 
-      stk_gt, stk_out = utils.stacking_batch(input, outputs)
-      stk_out = stk_out.squeeze(1)
-      stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
-      loss = seg_loss(stk_out, stk_gt.float().to(device))
-      #loss = utils.compute_loss(stk_out, stk_gt, loss_functions, loss_weights, device)
-      print(f"Loss: {loss}")        
-      
+        stk_gt, stk_out = utils.stacking_batch(input, outputs)
+        stk_out = stk_out.squeeze(1)
+        stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
+        loss = seg_loss(stk_out, stk_gt.float().to(device))
+        #loss = utils.compute_loss(stk_out, stk_gt, loss_functions, loss_weights, device)
+        print(f"Loss: {loss}")
+        batch_loss.append(loss)
+                
+      scan_loss = mean(batch_loss)
       optimizer.zero_grad()
-      loss.backward()
+      scan_loss.backward()
       # optimize
       optimizer.step()
-      epoch_losses.append(loss.item())
+      epoch_losses.append(scan_loss.item())
 
     print(f'EPOCH: {epoch}; Mean training loss: {mean(epoch_losses)}')
     utils.save_tloss_csv(training_loss_path, epoch, mean(epoch_losses))
