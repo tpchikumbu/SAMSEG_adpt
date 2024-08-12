@@ -39,11 +39,10 @@ model = sam_lora.sam
 processor = Samprocessor(model)
 
 # Ring loader vs BraTS loader
-# train_ds = DatasetSegmentation(config_file, processor, mode="train")
 train_ds = BratsDataset(train_dataset_path, "train")
 
 # Create a dataloader
-train_dataloader = DataLoader(train_ds, batch_size=config_file["TRAIN"]["BATCH_SIZE"], shuffle=True, collate_fn=collate_fn)
+train_dataloader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=collate_fn)
 # Initialize optimize and Loss
 optimizer = Adam(model.image_encoder.parameters(), lr=6e-5, weight_decay=0)
 seg_loss = monai.losses.DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
@@ -77,30 +76,37 @@ for epoch in range(num_epochs):
     for i, batch in enumerate(tqdm(train_dataloader)):
       torch.cuda.empty_cache()
       print(f"{batch[0][0]}:")
-      # batch[0][2] = (batch[0][2] > 0).float() # Convert to binary
+      
       slice_idx = find_slices((batch[0][2] > 0).float())
       batch_loss = []
-      input = []
       for idx in slice_idx:
+        input = []
+        outputs = []
         for image in batch[0][1]:
           input.append(processor(image, batch[0][2], idx))
-        outputs = model(batched_input=input,
-                        multimask_output=False)
-
-        stk_gt, stk_out = utils.stacking_batch(input, outputs)
-        stk_out = stk_out.squeeze(1)
-        stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
+        with torch.no_grad():
+          for j in range(len(input)):
+            chunked_outputs = model(batched_input=[input[j]],
+                          multimask_output=False)
+            #chunked_outputs.requires_grad_(True)
+            outputs.extend(chunked_outputs)
+          stk_gt, stk_out = utils.stacking_batch(input, outputs)
+          stk_out = stk_out.squeeze(1)
+          stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
         loss = seg_loss(stk_out, stk_gt.float().to(device))
         #loss = utils.compute_loss(stk_out, stk_gt, loss_functions, loss_weights, device)
         print(f"Loss: {loss}")
         batch_loss.append(loss)
                 
-      scan_loss = mean(batch_loss)
+      scan_loss = torch.mean(torch.stack(batch_loss))
       optimizer.zero_grad()
+      scan_loss.requires_grad_(True)
       scan_loss.backward()
       # optimize
       optimizer.step()
       epoch_losses.append(scan_loss.item())
+
+      torch.cuda.empty_cache()
 
     print(f'EPOCH: {epoch}; Mean training loss: {mean(epoch_losses)}')
     utils.save_tloss_csv(training_loss_path, epoch, mean(epoch_losses))

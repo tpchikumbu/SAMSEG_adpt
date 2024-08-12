@@ -30,8 +30,9 @@ test_dataset_path = "/home/peter/Documents/Code/samseg/src/testSamples/MEDIUM_Sa
 processor = Samprocessor(model)
 
 test_ds = BratsDataset(test_dataset_path, "train")
-train_dataloader = DataLoader(train_ds, batch_size=config_file["TRAIN"]["BATCH_SIZE"], shuffle=True, collate_fn=collate_fn)
+train_dataloader = DataLoader(test_ds, batch_size=1, shuffle=True, collate_fn=collate_fn)
 
+predictor = SamPredictor(model)
 
 
 def inference_model(sam_model, image_path, filename, mask_path=None, bbox=None, is_baseline=False):
@@ -40,24 +41,26 @@ def inference_model(sam_model, image_path, filename, mask_path=None, bbox=None, 
         rank = sam_model.rank
     else:
         model = build_sam_vit_b(checkpoint=sam_checkpoint)
+    
+    with torch.no_grad():
+        model.eval()
+        model.to(device)
 
-    model.eval()
-    model.to(device)
-    image = Image.open(image_path)
-    if mask_path != None:
-        mask = Image.open(mask_path)
-        mask = mask.convert('1')
-        ground_truth_mask =  np.array(mask)
-        box = utils.get_bounding_box(ground_truth_mask)
-    else:
-        box = bbox
+        image = image_path #set image to loaded tensor
+        if mask_path != None:
+            mask = Image.open(mask_path)
+            mask = mask.convert('1')
+            ground_truth_mask =  np.array(mask)
+            box = utils.get_bounding_box(ground_truth_mask)
+        else:
+            box = bbox
 
-    predictor = SamPredictor(model)
-    predictor.set_image(np.array(image))
-    masks, iou_pred, low_res_iou = predictor.predict(
-        box=np.array(box),
-        multimask_output=False,
-    )
+        predictor = SamPredictor(model)
+        predictor.set_image(np.array(image))
+        masks, iou_pred, low_res_iou = predictor.predict(
+            box=np.array(box),
+            multimask_output=False,
+        )
 
     if mask_path == None:
         fig, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(15, 15))
