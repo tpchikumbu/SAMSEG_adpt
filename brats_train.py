@@ -44,7 +44,7 @@ train_ds = BratsDataset(train_dataset_path, "train")
 # Create a dataloader
 train_dataloader = DataLoader(train_ds, batch_size=1, shuffle=True, collate_fn=collate_fn)
 # Initialize optimize and Loss
-optimizer = Adam(model.image_encoder.parameters(), lr=6e-5, weight_decay=0)
+optimizer = Adam(model.image_encoder.parameters(), lr=1e-4, weight_decay=0)
 seg_loss = monai.losses.DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
 num_epochs = config_file["TRAIN"]["NUM_EPOCHS"]
 
@@ -80,21 +80,23 @@ for epoch in range(num_epochs):
       slice_idx = find_slices((batch[0][2] > 0).float())
       batch_loss = []
       for idx in slice_idx:
-        input = []
+        #input = []
         outputs = []
         for image in batch[0][1]:
-          input.append(processor(image, batch[0][2], idx))
-        with torch.no_grad():
-          for j in range(len(input)):
-            chunked_outputs = model(batched_input=[input[j]],
-                          multimask_output=False)
-            #chunked_outputs.requires_grad_(True)
-            outputs.extend(chunked_outputs)
-          stk_gt, stk_out = utils.stacking_batch(input, outputs)
-          stk_out = stk_out.squeeze(1)
-          stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
+          input = [processor(image, batch[0][2], idx)]
+          chunked_outputs = model(batched_input=input,
+                        multimask_output=False)
+          #chunked_outputs.requires_grad_(True)
+          outputs.extend(chunked_outputs)
+          del chunked_outputs
+        stk_gt, stk_out = utils.stacking_batch(input, outputs)
+        stk_out = stk_out.squeeze(1)
+        stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
         loss = seg_loss(stk_out, stk_gt.float().to(device))
         #loss = utils.compute_loss(stk_out, stk_gt, loss_functions, loss_weights, device)
+        
+        loss = map(seg_loss, stk_out, stk_gt.float().to(device))
+
         print(f"Loss: {loss}")
         batch_loss.append(loss)
                 
@@ -102,6 +104,7 @@ for epoch in range(num_epochs):
       optimizer.zero_grad()
       scan_loss.requires_grad_(True)
       scan_loss.backward()
+      # print("GRADIENT:   ", scan_loss.grad)
       # optimize
       optimizer.step()
       epoch_losses.append(scan_loss.item())
