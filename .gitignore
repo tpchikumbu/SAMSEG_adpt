@@ -1,4 +1,6 @@
 sam_vit_b_01ec64.pth
+train-out/
+*.safetensors
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
