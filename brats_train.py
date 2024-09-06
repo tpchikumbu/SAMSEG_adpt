@@ -4,7 +4,6 @@ import monai
 from tqdm import tqdm
 from statistics import mean
 from torch.utils.data import DataLoader
-# from torchvision import datasets, transforms
 from torch.optim import Adam
 import torch.nn as nn
 from torch.nn.functional import threshold, normalize
@@ -75,13 +74,14 @@ for epoch in range(num_epochs):
 
     for i, batch in enumerate(tqdm(train_dataloader)):
       torch.cuda.empty_cache()
-      print(f"{batch[0][0]}:")
+      # print(f"{batch[0][0]}:")
       
       slice_idx = find_slices((batch[0][2] > 0).float())
       batch_loss = []
       for idx in slice_idx:
-        #input = []
+        
         outputs = []
+        #with torch.no_grad():
         for image in batch[0][1]:
           input = [processor(image, batch[0][2], idx)]
           chunked_outputs = model(batched_input=input,
@@ -91,23 +91,39 @@ for epoch in range(num_epochs):
           del chunked_outputs
         stk_gt, stk_out = utils.stacking_batch(input, outputs)
         stk_out = stk_out.squeeze(1)
-        stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
-        loss = seg_loss(stk_out, stk_gt.float().to(device))
-        #loss = utils.compute_loss(stk_out, stk_gt, loss_functions, loss_weights, device)
+        # stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
         
-        loss = map(seg_loss, stk_out, stk_gt.float().to(device))
+        # Apply loss function to each scan type and calculate the average
+        # dumb_loss = []
+        # for i in range(stk_out.shape[0]):
+        #   loss_one = seg_loss(stk_out[i], stk_gt.float().to(device))
+        #   dumb_loss.append(loss_one)
+        # loss_avg = torch.mean(torch.stack(dumb_loss))
+        # print(f"Loss (avg): {loss_avg}")
 
-        print(f"Loss: {loss}")
-        batch_loss.append(loss)
+        # Loss calculation with map function
+        stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
+        stk_gt = stk_gt.repeat(4, 1, 1, 1)
+        loss = map(seg_loss, stk_out, stk_gt.float().to(device))
+        loss_list = list(loss) # Convert map object to list
+        loss_avg = torch.mean(torch.stack(loss_list)) # Calculate the average loss per scan type
+
+        # Optimize parameters with the average loss
+        optimizer.zero_grad()
+        loss_avg.backward()
+        optimizer.step()
+        
+
+        batch_loss.append(loss_avg)
                 
-      scan_loss = torch.mean(torch.stack(batch_loss))
-      optimizer.zero_grad()
-      scan_loss.requires_grad_(True)
-      scan_loss.backward()
-      # print("GRADIENT:   ", scan_loss.grad)
-      # optimize
-      optimizer.step()
-      epoch_losses.append(scan_loss.item())
+      img_loss = torch.mean(torch.stack(batch_loss))
+      # optimizer.zero_grad()
+      # scan_loss.requires_grad_(True)
+      # scan_loss.backward()
+      # # print("GRADIENT:   ", scan_loss.grad)
+      # # optimize
+      # optimizer.step()
+      epoch_losses.append(img_loss.item())
 
       torch.cuda.empty_cache()
 
