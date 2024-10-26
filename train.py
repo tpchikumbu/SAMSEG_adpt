@@ -15,6 +15,7 @@ from src.lora import LoRA_sam
 import matplotlib.pyplot as plt
 import yaml
 import torch.nn.functional as F
+from monai.metrics import DiceMetric
 """
 This file is used to train a LoRA_sam model. I use that monai DiceLoss for the training. The batch size and number of epochs are taken from the configuration file.
 The model is saved at the end as a safetensor.
@@ -50,6 +51,7 @@ total_loss = []
 
 for epoch in range(num_epochs):
     epoch_losses = []
+    dice = DiceMetric(include_background=False, reduction="mean_batch")
 
     for i, batch in enumerate(tqdm(train_dataloader)):
       
@@ -59,8 +61,12 @@ for epoch in range(num_epochs):
       stk_gt, stk_out = utils.stacking_batch(batch, outputs)
       stk_out = stk_out.squeeze(1)
       stk_gt = stk_gt.unsqueeze(1) # We need to get the [B, C, H, W] starting from [H, W]
-      loss = seg_loss(stk_out, stk_gt.float().to(device))
+      loss = seg_loss(stk_out, torch.sigmoid(stk_out))
       
+      # Calculate dice
+      preds = (torch.sigmoid(stk_out) > 0.5).float()
+      dice_val = dice(preds, stk_gt)
+
       optimizer.zero_grad()
       loss.backward()
       # optimize
