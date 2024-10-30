@@ -2,9 +2,19 @@ DATASET:
   TRAIN_PATH: "./dataset/train"
   TEST_PATH: "./dataset/test"
 
+BRATS_DATASET:
+  TRAIN_PATH: "/home/peter/Documents/Code/samseg/src/testSamples/MEDIUM_Samples"
+  TEST_PATH: "/home/peter/Documents/Code/samseg/src/testSamples/MEDIUM_Samples"
+
 SAM:
   CHECKPOINT: "/home/peter/Documents/Code/samseg/src/sam_vit_b_01ec64.pth"
-  RANK: 512
+  RANK: 32
+
 TRAIN:
   BATCH_SIZE: 1
   NUM_EPOCHS: 5
+  BACKUP_EVERY: 5
+  VALIDATE_EVERY: 2
+
+OUTPUT:
+  OUT_DIR: "./train-out"

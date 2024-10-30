@@ -86,6 +86,13 @@ class LoRA_sam(nn.Module):
         # freeze parameters of the image encoder
         for param in sam_model.image_encoder.parameters():
             param.requires_grad = False
+        # freeze parameters of the prompt encoder
+        for param in sam_model.prompt_encoder.parameters():
+            param.requires_grad = False
+
+        # freeze parameters of the mask decoder
+        for param in sam_model.mask_decoder.parameters():
+            param.requires_grad = False
 
         for t_layer_i, blk in enumerate(sam_model.image_encoder.blocks):
             # if only lora on few layers
